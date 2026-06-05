@@ -1,1 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<title>Salazar Training System</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+
+<!-- ── FIREBASE ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// ════════════════════════════════════════════════════════════
+//  🔧  PASTE YOUR FIREBASE CONFIG HERE
+//  Go to: console.firebase.google.com → Your Project
+//  → Project Settings → Your Apps → Config
+// ════════════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "AIzaSyCSwlfWsck_Jit8eBDR1WxWZ9OyKmBX-B8",
+  authDomain:        "salazar-training.firebaseapp.com",
+  projectId:         "salazar-training",
+  storageBucket:     "salazar-training.firebasestorage.app",
+  messagingSenderId: "984848367627",
+  appId:             "1:984848367627:web:b6cf325f3bdcd5c51f070e"
+};
+// ════════════════════════════════════════════════════════════
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+// ── AUTH STATE ──────────────────────────────────────────────
+onAuthStateChanged(auth, user => {
+  if (user) {
+    window._uid = user.uid;
+    window._userEmail = user.email;
+    showApp();
+    loadAll();
+  } else {
+    window._uid = null;
+    showLogin();
+  }
+});
+
+// ── LOGIN ───────────────────────────────────────────────────
+window.doLogin = async () => {
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass  = document.getElementById("loginPass").value;
+  const errEl = document.getElementById("loginErr");
+  errEl.textContent = "";
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch(e) {
+    errEl.textContent = "Invalid email or password.";
+  }
+};
+window.doLogout = async () => { await signOut(auth); };
+
+// ── FIRESTORE HELPERS ───────────────────────────────────────
+const logRef  = date => doc(db, "users", window._uid, "logs", date);
+const tmplRef = ()   => doc(db, "users", window._uid, "meta", "templates");
+const pnRef   = ()   => doc(db, "users", window._uid, "meta", "peptideNames");
+
+window._db = {
+  async saveLog(date, data) {
+    await setDoc(logRef(date), data, { merge: true });
+  },
+  async loadLog(date) {
+    const s = await getDoc(logRef(date));
+    return s.exists() ? s.data() : null;
+  },
+  async loadAllLogs() {
+    const col = collection(db, "users", window._uid, "logs");
+    const snap = await getDocs(col);
+    const out = {};
+    snap.forEach(d => out[d.id] = d.data());
+    return out;
+  },
+  async saveTemplates(t) {
+    await setDoc(tmplRef(), { data: JSON.stringify(t) });
+  },
+  async loadTemplates() {
+    const s = await getDoc(tmplRef());
+    return s.exists() ? JSON.parse(s.data().data) : {};
+  },
+  async savePeptideNames(arr) {
+    await setDoc(pnRef(), { names: arr });
+  },
+  async loadPeptideNames() {
+    const s = await getDoc(pnRef());
+    return s.exists() ? (s.data().names || []) : [];
+  }
+};
+
+// ── BOOT ────────────────────────────────────────────────────
+async function loadAll() {
+  showLoading(true);
+  try {
+    window._logs       = await window._db.loadAllLogs();
+    window._templates  = await window._db.loadTemplates();
+    window._pepNames   = await window._db.loadPeptideNames();
+  } catch(e) {
+    window._logs = {}; window._templates = {}; window._pepNames = [];
+  }
+  showLoading(false);
+  renderApp();
+}
+</script>
+
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;background:#0a0a0f;font-family:'DM Sans','Segoe UI',sans-serif;color:#e2e2e2;overflow-x:hidden}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#111}::-webkit-scrollbar-thumb{background:#c8a96e;border-radius:2px}
+input,select,textarea,button{font-family:inherit}
+
+/* ── LOGIN ── */
+#loginScreen{display:none;min-height:100vh;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px}
+#loginScreen.visible{display:flex}
+.login-box{background:#131318;border:1px solid #222;border-radius:20px;padding:32px 24px;width:100%;max-width:360px}
+.login-logo{font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:4px;color:#c8a96e;text-align:center;margin-bottom:4px}
+.login-sub{font-size:11px;color:#444;letter-spacing:2px;text-align:center;margin-bottom:28px}
+.login-label{font-size:11px;color:#666;letter-spacing:1px;margin-bottom:6px}
+.login-input{width:100%;background:#0e0e14;border:1px solid #2a2a35;border-radius:10px;color:#e2e2e2;padding:12px 14px;font-size:15px;outline:none;margin-bottom:14px;transition:border-color .2s}
+.login-input:focus{border-color:#c8a96e}
+.login-btn{width:100%;background:linear-gradient(135deg,#c8a96e,#a07840);color:#0a0a0f;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:1px;margin-top:4px}
+#loginErr{color:#e05555;font-size:12px;text-align:center;min-height:18px;margin-top:8px}
+
+/* ── APP SHELL ── */
+#appShell{display:none;max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:80px}
+#appShell.visible{display:block}
+
+/* ── LOADING ── */
+#loadingScreen{display:none;min-height:100vh;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:3px;color:#c8a96e}
+#loadingScreen.visible{display:flex}
+
+/* ── HEADER ── */
+.app-header{padding:22px 20px 14px;border-bottom:1px solid #1a1a22;display:flex;align-items:center;justify-content:space-between}
+.logo-main{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:3px;color:#c8a96e;line-height:1}
+.logo-sub{font-size:10px;color:#444;letter-spacing:2px;margin-top:2px}
+.header-right{text-align:right}
+.header-date{font-size:12px;color:#555}
+.logout-btn{font-size:10px;color:#444;background:none;border:none;cursor:pointer;letter-spacing:1px;margin-top:4px;text-decoration:underline}
+
+/* ── NAV ── */
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#0d0d12;border-top:1px solid #1a1a22;display:flex;padding:8px 0 16px;z-index:50}
+.nav-btn{flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;color:#444;transition:color .2s}
+.nav-btn.active{color:#c8a96e}
+.nav-label{font-size:9px;letter-spacing:1.5px;font-weight:600}
+
+/* ── CONTENT ── */
+.content{padding:0 16px;margin-top:16px}
+
+/* ── CARDS / SHARED ── */
+.card{background:#131318;border:1px solid #222;border-radius:14px}
+.section-title{font-family:'Bebas Neue',sans-serif;letter-spacing:2px;font-size:13px;color:#c8a96e;margin:0 0 10px}
+.btn-gold{background:linear-gradient(135deg,#c8a96e,#a07840);color:#0a0a0f;border:none;border-radius:10px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .1s}
+.btn-gold:active{transform:scale(.96);opacity:.9}
+.btn-ghost{background:transparent;border:1px solid #333;color:#aaa;border-radius:10px;cursor:pointer;transition:all .15s}
+.btn-ghost:hover,.btn-ghost:focus{border-color:#c8a96e;color:#c8a96e}
+.input-field{background:#0e0e14;border:1px solid #2a2a35;border-radius:10px;color:#e2e2e2;padding:10px 12px;width:100%;outline:none;transition:border-color .2s;font-size:14px}
+.input-field:focus{border-color:#c8a96e}
+.pill{display:inline-flex;align-items:center;gap:4px;background:#1a1a24;border:1px solid #2a2a35;border-radius:20px;padding:4px 10px;font-size:12px}
+.badge{display:inline-block;background:#1e1e10;border:1px solid #c8a96e44;color:#c8a96e;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600}
+.muscle-bar{height:6px;border-radius:3px;transition:width .4s}
+.ex-row{background:#0e0e14;border:1px solid #1e1e28;border-radius:12px;padding:12px;margin-bottom:8px}
+.day-type-row{display:flex;gap:8px;margin-bottom:16px}
+.day-type-btn{flex:1;padding:10px;border-radius:10px;border:1.5px solid #222;background:#0e0e14;color:#888;cursor:pointer;font-size:13px;font-weight:500;transition:all .2s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.day-type-btn.active{border-color:#c8a96e;color:#c8a96e;background:#161610}
+.log-card{padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .2s}
+.log-card:hover{border-color:#c8a96e44}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;display:flex;align-items:flex-end}
+.modal{background:#131318;border-radius:20px 20px 0 0;padding:20px;width:100%;max-height:85vh;overflow-y:auto}
+.week-bar-wrap{margin-bottom:8px}
+select.input-field{appearance:none}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#c8a96e;color:#0a0a0f;padding:8px 20px;border-radius:20px;font-weight:700;font-size:13px;z-index:999;pointer-events:none;opacity:0;transition:opacity .3s}
+.toast.show{opacity:1}
+.set-grid{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;align-items:center;margin-top:6px}
+.saving-dot{width:6px;height:6px;border-radius:50%;background:#c8a96e;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- LOADING -->
+<div id="loadingScreen"><span>LOADING...</span></div>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">SALAZAR</div>
+    <div class="login-sub">TRAINING SYSTEM</div>
+    <div class="login-label">EMAIL</div>
+    <input class="login-input" id="loginEmail" type="email" autocomplete="email" placeholder="you@email.com" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <div class="login-label">PASSWORD</div>
+    <input class="login-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <button class="login-btn" onclick="doLogin()">ENTER</button>
+    <div id="loginErr"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appShell">
+  <div class="app-header">
+    <div>
+      <div class="logo-main">SALAZAR</div>
+      <div class="logo-sub">TRAINING SYSTEM</div>
+    </div>
+    <div class="header-right">
+      <div class="header-date" id="headerDate"></div>
+      <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:4px">
+        <div id="savingDot" style="display:none" class="saving-dot"></div>
+        <button class="logout-btn" onclick="doLogout()">SIGN OUT</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="content" id="mainContent"></div>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" id="nav-log" onclick="switchTab('log')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 5v14M18 5v14M6 8h12M6 16h12"/><rect x="2" y="6" width="4" height="12" rx="1"/><rect x="18" y="6" width="4" height="12" rx="1"/></svg>
+      <span class="nav-label">LOG</span>
+    </button>
+    <button class="nav-btn" id="nav-history" onclick="switchTab('history')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span class="nav-label">HISTORY</span>
+    </button>
+    <button class="nav-btn" id="nav-weekly" onclick="switchTab('weekly')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span class="nav-label">WEEKLY</span>
+    </button>
+    <button class="nav-btn" id="nav-peptides" onclick="switchTab('peptides')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2L7 4l3 3-7 7 2 2 7-7 3 3-2 2 2 2 8-8-2-2-2 2-3-3 3-3-2-2z"/><line x1="6" y1="18" x2="2" y2="22"/></svg>
+      <span class="nav-label">PEPTIDES</span>
+    </button>
+  </nav>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════
+window._logs      = {};
+window._templates = {};
+window._pepNames  = [];
+window._tab       = "log";
+window._editDate  = null;   // date string being edited (null = today)
+window._saveTimer = null;
+
+const MUSCLES = ["Chest","Back","Shoulders","Biceps","Triceps","Legs","Glutes","Abs","Traps","Calves"];
+const MONTHS  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAYS    = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const REC     = {Chest:12,Back:14,Shoulders:12,Biceps:10,Triceps:10,Legs:14,Glutes:12,Abs:10,Traps:8,Calves:10};
+
+function todayStr() { return new Date().toISOString().slice(0,10); }
+function fmtDate(d) {
+  const dt = new Date(d+"T12:00:00");
+  return `${MONTHS[dt.getMonth()]} ${dt.getDate()}, ${dt.getFullYear()}`;
+}
+function fmtShort(d) {
+  const dt = new Date(d+"T12:00:00");
+  return `${MONTHS[dt.getMonth()]} ${dt.getDate()}`;
+}
+
+// ══════════════════════════════════════════════════
+//  UI HELPERS
+// ══════════════════════════════════════════════════
+function showLogin()   { document.getElementById("loginScreen").classList.add("visible"); document.getElementById("appShell").classList.remove("visible"); document.getElementById("loadingScreen").classList.remove("visible"); }
+function showApp()     { document.getElementById("loginScreen").classList.remove("visible"); document.getElementById("appShell").classList.add("visible"); document.getElementById("loadingScreen").classList.remove("visible"); document.getElementById("headerDate").textContent = new Date().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"}); }
+function showLoading(v){ document.getElementById("loadingScreen").classList.toggle("visible",v); document.getElementById("appShell").classList.toggle("visible",!v); if(v) document.getElementById("loginScreen").classList.remove("visible"); }
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2000);
+}
+
+function showSaving(v) {
+  document.getElementById("savingDot").style.display = v ? "block" : "none";
+}
+
+// ══════════════════════════════════════════════════
+//  SAVE (debounced)
+// ══════════════════════════════════════════════════
+function scheduleSave(date) {
+  showSaving(true);
+  clearTimeout(window._saveTimer);
+  window._saveTimer = setTimeout(async () => {
+    try {
+      const data = window._logs[date] || {};
+      await window._db.saveLog(date, data);
+    } catch(e) { console.error("Save failed", e); }
+    showSaving(false);
+  }, 1200);
+}
+
+function updateLog(date, patch) {
+  window._logs[date] = { ...(window._logs[date]||{}), ...patch };
+  scheduleSave(date);
+}
+
+// ══════════════════════════════════════════════════
+//  TAB ROUTING
+// ══════════════════════════════════════════════════
+function switchTab(tab) {
+  window._tab = tab;
+  window._editDate = null;
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+  document.getElementById("nav-"+tab).classList.add("active");
+  renderApp();
+}
+
+function renderApp() {
+  const c = document.getElementById("mainContent");
+  if (window._tab === "log")       c.innerHTML = renderLog(window._editDate || todayStr());
+  if (window._tab === "history")   c.innerHTML = renderHistory();
+  if (window._tab === "weekly")    c.innerHTML = renderWeekly(0);
+  if (window._tab === "peptides")  c.innerHTML = renderPeptides(window._editDate || todayStr());
+  bindEvents();
+}
+
+// ══════════════════════════════════════════════════
+//  LOG TAB
+// ══════════════════════════════════════════════════
+function renderLog(date) {
+  const log = window._logs[date] || {};
+  const isToday = date === todayStr();
+  const type = log.type || null;
+  const exercises = log.exercises || [];
+  const dateLabel = isToday ? `<span style="color:#c8a96e">TODAY</span>` : `<span style="color:#e8874a">EDITING</span>`;
+
+  return `
+  <!-- Date picker bar -->
+  <div class="card" style="padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:1px;white-space:nowrap">${dateLabel}</div>
+    <input type="date" value="${date}" max="${todayStr()}"
+      style="background:#0e0e14;border:1px solid #2a2a35;border-radius:8px;color:#e2e2e2;padding:6px 10px;font-size:13px;outline:none;flex:1;font-family:inherit;color-scheme:dark"
+      onchange="switchLogDate(this.value)"/>
+    ${!isToday ? `<button class="btn-ghost" style="padding:6px 12px;font-size:12px;white-space:nowrap" onclick="backToToday()">Today</button>` : ""}
+  </div>
+
+  <!-- Weight -->
+  <div class="card" style="padding:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+    <div style="font-size:13px;color:#555;letter-spacing:1px">BODYWEIGHT</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <input class="input-field" type="number" id="bwInput" placeholder="lbs" value="${log.weight||""}"
+        style="width:80px;text-align:center;font-size:16px;font-weight:600" onchange="onWeightChange(this.value,'${date}')"/>
+      <div style="font-size:11px;color:#555">LBS</div>
+    </div>
+  </div>
+
+  <!-- Day Type -->
+  <p class="section-title">DAY TYPE</p>
+  <div class="day-type-row">
+    ${["training","cardio","rest"].map(t=>`
+    <button class="day-type-btn${type===t?" active":""}" onclick="setDayType('${t}','${date}')">
+      ${t==="training"?'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 5v14M18 5v14M6 8h12M6 16h12"/><rect x="2" y="6" width="4" height="12" rx="1"/><rect x="18" y="6" width="4" height="12" rx="1"/></svg>':
+       t==="cardio"?'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="14" cy="3" r="1.5"/><path d="M9 8l2 4 4 2 2 5"/><path d="M4 12l4 2 2-4 4-2 3 4"/></svg>':
+       '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'}
+      <span style="font-size:11px">${t.charAt(0).toUpperCase()+t.slice(1)}</span>
+    </button>`).join("")}
+  </div>
+
+  ${type==="training" ? renderExercisesSection(exercises, date) : ""}
+  ${type==="cardio"   ? renderCardioSection(log.cardio||"", date) : ""}
+  ${type==="rest"     ? `<div class="card" style="padding:24px;text-align:center;margin-bottom:14px"><div style="font-size:36px;margin-bottom:8px">😴</div><div style="color:#888;font-size:14px">Rest day logged. Recovery is part of the grind.</div></div>` : ""}
+  ${type ? renderNotesSection(log.notes||"", date) : ""}
+
+  <!-- Template modals (hidden) -->
+  <div id="saveTemplateModal" class="modal-bg" style="display:none" onclick="closeTplModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <p class="section-title">SAVE AS TEMPLATE</p>
+      <input class="input-field" id="tplNameInput" placeholder="e.g. Push Day A" style="margin-bottom:12px"/>
+      <div style="display:flex;gap:8px">
+        <button class="btn-ghost" style="flex:1;padding:12px;font-size:14px" onclick="closeTplModal()">Cancel</button>
+        <button class="btn-gold" style="flex:2;padding:12px;font-size:14px" onclick="saveTemplate('${date}')">Save Template</button>
+      </div>
+    </div>
+  </div>
+  <div id="loadTemplateModal" class="modal-bg" style="display:none" onclick="closeTplModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <p class="section-title">LOAD TEMPLATE</p>
+      <div id="tplList">${renderTemplateList(date)}</div>
+      <button class="btn-ghost" style="width:100%;padding:12px;margin-top:8px;font-size:14px" onclick="closeTplModal()">Close</button>
+    </div>
+  </div>
+  `;
+}
+
+function renderExercisesSection(exercises, date) {
+  const totalSets = exercises.reduce((a,e)=>a+(e.sets||[]).length,0);
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <p class="section-title" style="margin:0">EXERCISES (${totalSets} sets)</p>
+    <div style="display:flex;gap:6px">
+      <button class="btn-ghost" style="padding:6px 10px;font-size:12px;display:flex;align-items:center;gap:4px" onclick="openLoadTpl()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Load
+      </button>
+      <button class="btn-ghost" style="padding:6px 10px;font-size:12px;display:flex;align-items:center;gap:4px" onclick="openSaveTpl()" ${exercises.length===0?"disabled":""}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save
+      </button>
+    </div>
+  </div>
+  <div id="exerciseList">
+    ${exercises.map((ex,i)=>renderExCard(ex,i,date)).join("")}
+  </div>
+  <button class="btn-gold" style="width:100%;padding:13px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:16px" onclick="addExercise('${date}')">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ADD EXERCISE
+  </button>`;
+}
+
+function renderExCard(ex, idx, date) {
+  const collapsed = ex._collapsed || false;
+  return `
+  <div class="ex-row" id="ex-${idx}">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:${collapsed?0:8}px">
+      <input class="input-field" placeholder="Exercise name" value="${esc(ex.name||"")}"
+        style="flex:1;font-size:14px;font-weight:500" onchange="updateExField('${date}',${idx},'name',this.value)"/>
+      <select class="input-field" style="width:110px;font-size:12px;padding:8px 6px" onchange="updateExField('${date}',${idx},'muscle',this.value)">
+        ${MUSCLES.map(m=>`<option${ex.muscle===m?" selected":""}>${m}</option>`).join("")}
+      </select>
+      <button onclick="toggleEx(${idx})" style="background:none;border:none;color:#555;cursor:pointer;padding:4px;font-size:14px">${collapsed?"▼":"▲"}</button>
+      <button onclick="removeExercise('${date}',${idx})" style="background:none;border:none;color:#c44;cursor:pointer;padding:4px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>
+    </div>
+    ${!collapsed ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:4px">
+      ${["REPS","LBS","NOTES",""].map(h=>`<div style="font-size:10px;color:#555;letter-spacing:1px">${h}</div>`).join("")}
+    </div>
+    ${(ex.sets||[]).map((s,si)=>`
+    <div class="set-grid" id="set-${idx}-${si}">
+      <input class="input-field" type="number" placeholder="12" value="${esc(s.reps||"")}"
+        style="text-align:center;font-size:14px;font-weight:600;padding:8px 4px" onchange="updateSetField('${date}',${idx},${si},'reps',this.value)"/>
+      <input class="input-field" type="number" placeholder="135" value="${esc(s.weight||"")}"
+        style="text-align:center;font-size:14px;font-weight:600;padding:8px 4px" onchange="updateSetField('${date}',${idx},${si},'weight',this.value)"/>
+      <input class="input-field" placeholder="note" value="${esc(s.notes||"")}"
+        style="font-size:12px;padding:8px 6px" onchange="updateSetField('${date}',${idx},${si},'notes',this.value)"/>
+      <button onclick="removeSet('${date}',${idx},${si})" style="background:none;border:none;color:#555;cursor:pointer;padding:4px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>`).join("")}
+    <button onclick="addSet('${date}',${idx})" style="background:none;border:none;color:#c8a96e;cursor:pointer;font-size:12px;padding:6px 0;display:flex;align-items:center;gap:4px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Set
+    </button>` : ""}
+  </div>`;
+}
+
+function renderCardioSection(cardio, date) {
+  return `
+  <p class="section-title">CARDIO DETAILS</p>
+  <textarea class="input-field" rows="3" placeholder="e.g. 30 min incline walk 3.5mph, 15 min stairmaster..."
+    style="resize:none;margin-bottom:14px" onchange="onCardioChange(this.value,'${date}')">${esc(cardio)}</textarea>`;
+}
+
+function renderNotesSection(notes, date) {
+  return `
+  <p class="section-title">SESSION NOTES</p>
+  <textarea class="input-field" rows="2" placeholder="Energy, pumps, sleep, anything notable..."
+    style="resize:none;margin-bottom:14px" onchange="onNotesChange(this.value,'${date}')">${esc(notes)}</textarea>`;
+}
+
+function renderTemplateList(date) {
+  const keys = Object.keys(window._templates);
+  if (!keys.length) return `<div style="color:#555;text-align:center;padding:20px">No templates saved yet.</div>`;
+  return keys.map(name=>`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <button class="btn-ghost" style="flex:1;padding:10px 14px;text-align:left;font-size:14px;color:#e2e2e2" onclick="loadTemplate('${esc(name)}','${date}')">${esc(name)}</button>
+      <button class="btn-ghost" style="padding:10px;color:#c44" onclick="deleteTpl('${esc(name)}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+      </button>
+    </div>`).join("");
+}
+
+// ── Exercise mutations ──────────────────────────────────────
+function addExercise(date) {
+  const log = window._logs[date] || {};
+  const exs = [...(log.exercises||[]), {id:Date.now(),name:"",muscle:"Chest",sets:[{reps:"",weight:"",notes:""}]}];
+  updateLog(date,{exercises:exs});
+  renderApp();
+}
+function removeExercise(date,idx) {
+  const exs = [...(window._logs[date]?.exercises||[])];
+  exs.splice(idx,1);
+  updateLog(date,{exercises:exs});
+  renderApp();
+}
+function updateExField(date,idx,field,val) {
+  const exs = JSON.parse(JSON.stringify(window._logs[date]?.exercises||[]));
+  exs[idx][field] = val;
+  updateLog(date,{exercises:exs});
+}
+function addSet(date,idx) {
+  const exs = JSON.parse(JSON.stringify(window._logs[date]?.exercises||[]));
+  exs[idx].sets = [...(exs[idx].sets||[]),{reps:"",weight:"",notes:""}];
+  updateLog(date,{exercises:exs});
+  renderApp();
+}
+function removeSet(date,idx,si) {
+  const exs = JSON.parse(JSON.stringify(window._logs[date]?.exercises||[]));
+  exs[idx].sets.splice(si,1);
+  updateLog(date,{exercises:exs});
+  renderApp();
+}
+function updateSetField(date,idx,si,field,val) {
+  const exs = JSON.parse(JSON.stringify(window._logs[date]?.exercises||[]));
+  exs[idx].sets[si][field] = val;
+  updateLog(date,{exercises:exs});
+}
+function toggleEx(idx) {
+  const exs = JSON.parse(JSON.stringify(window._logs[window._editDate||todayStr()]?.exercises||[]));
+  exs[idx]._collapsed = !exs[idx]._collapsed;
+  window._logs[window._editDate||todayStr()].exercises = exs;
+  renderApp();
+}
+function setDayType(type, date) {
+  updateLog(date,{type});
+  renderApp();
+}
+function onWeightChange(val,date)   { updateLog(date,{weight:val}); }
+function onCardioChange(val,date)   { updateLog(date,{cardio:val}); }
+function onNotesChange(val,date)    { updateLog(date,{notes:val}); }
+
+// ── Templates ───────────────────────────────────────────────
+function openSaveTpl() { document.getElementById("saveTemplateModal").style.display="flex"; }
+function openLoadTpl() { document.getElementById("tplList").innerHTML = renderTemplateList(window._editDate||todayStr()); document.getElementById("loadTemplateModal").style.display="flex"; }
+function closeTplModal(){ document.getElementById("saveTemplateModal").style.display="none"; document.getElementById("loadTemplateModal").style.display="none"; }
+function saveTemplate(date) {
+  const name = document.getElementById("tplNameInput").value.trim();
+  if (!name) return;
+  const exs = JSON.parse(JSON.stringify(window._logs[date]?.exercises||[]));
+  exs.forEach(e=>delete e._collapsed);
+  window._templates[name] = exs;
+  window._db.saveTemplates(window._templates);
+  closeTplModal(); toast("Template saved!");
+}
+function loadTemplate(name, date) {
+  const exs = JSON.parse(JSON.stringify(window._templates[name]||[])).map(e=>({...e,id:Date.now()+Math.random()}));
+  updateLog(date,{exercises:exs});
+  closeTplModal(); renderApp(); toast("Template loaded!");
+}
+function deleteTpl(name) {
+  delete window._templates[name];
+  window._db.saveTemplates(window._templates);
+  document.getElementById("tplList").innerHTML = renderTemplateList(window._editDate||todayStr());
+  toast("Template deleted.");
+}
+function backToToday() { window._editDate = null; renderApp(); }
+function switchLogDate(date) {
+  if (!date) return;
+  window._editDate = date === todayStr() ? null : date;
+  renderApp();
+}
+
+// ══════════════════════════════════════════════════
+//  HISTORY TAB
+// ══════════════════════════════════════════════════
+let _historyDetail = null;
+
+function renderHistory() {
+  if (_historyDetail) return renderHistoryDetail(_historyDetail);
+
+  const sorted = Object.entries(window._logs)
+    .sort(([a],[b])=>b.localeCompare(a));
+
+  const typeColor = {training:"#c8a96e",cardio:"#6eaec8",rest:"#6e8ec8"};
+  const typeIcon  = {
+    training:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 5v14M18 5v14M6 8h12M6 16h12"/><rect x="2" y="6" width="4" height="12" rx="1"/><rect x="18" y="6" width="4" height="12" rx="1"/></svg>`,
+    cardio:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="14" cy="3" r="1.5"/><path d="M9 8l2 4 4 2 2 5"/><path d="M4 12l4 2 2-4 4-2 3 4"/></svg>`,
+    rest:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>`
+  };
+
+  if (!sorted.length) return `<p class="section-title">HISTORY</p><div style="color:#555;text-align:center;padding:40px;font-size:14px">No logs yet. Start tracking!</div>`;
+
+  return `
+  <p class="section-title">TRAINING HISTORY</p>
+  ${sorted.map(([date,log])=>{
+    const muscles = [...new Set((log.exercises||[]).map(e=>e.muscle))];
+    const totalSets = (log.exercises||[]).reduce((a,e)=>a+(e.sets||[]).length,0);
+    return `
+    <div class="card log-card" onclick="openHistoryDetail('${date}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="color:${typeColor[log.type]||"#555"}">${typeIcon[log.type]||""}</div>
+          <div>
+            <div style="font-weight:600;font-size:15px">${fmtShort(date)}</div>
+            <div style="font-size:11px;color:#555">${new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long"})}</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          ${log.weight ? `<div style="font-size:13px;font-weight:600">${log.weight} lbs</div>` : ""}
+          <div style="font-size:11px;color:${typeColor[log.type]||"#555"};margin-top:2px">${(log.type||"").toUpperCase()}</div>
+        </div>
+      </div>
+      ${muscles.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">
+        ${muscles.map(m=>`<span class="pill" style="font-size:11px">${m}</span>`).join("")}
+        ${totalSets ? `<span class="pill" style="font-size:11px;color:#c8a96e">${totalSets} sets</span>` : ""}
+      </div>` : ""}
+    </div>`;
+  }).join("")}`;
+}
+
+function renderHistoryDetail(date) {
+  const log = window._logs[date] || {};
+  const totalSets = (log.exercises||[]).reduce((a,e)=>a+(e.sets||[]).length,0);
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <button class="btn-ghost" style="padding:7px 14px;font-size:12px;display:flex;align-items:center;gap:6px" onclick="closeHistoryDetail()">← Back</button>
+    <button class="btn-gold" style="padding:7px 14px;font-size:12px;display:flex;align-items:center;gap:6px" onclick="editDay('${date}','log')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit Day
+    </button>
+  </div>
+  <div class="card" style="padding:16px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:#c8a96e">${fmtDate(date)}</div>
+        <div style="font-size:12px;color:#555">${new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long"})}</div>
+      </div>
+      <div style="text-align:right">
+        ${log.weight ? `<div style="font-size:18px;font-weight:700">${log.weight} <span style="font-size:12px;color:#555">lbs</span></div>` : ""}
+        <span class="badge" style="margin-top:4px">${(log.type||"—").toUpperCase()}</span>
+      </div>
+    </div>
+  </div>
+  ${log.type==="training" ? (log.exercises||[]).map(ex=>`
+    <div class="card" style="padding:14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <div style="font-weight:600">${esc(ex.name)||"Unnamed"}</div>
+        <span class="pill">${ex.muscle}</span>
+      </div>
+      ${(ex.sets||[]).map((s,j)=>`
+        <div style="display:flex;gap:8px;font-size:13px;color:#aaa;margin-bottom:4px;align-items:center">
+          <span style="color:#555;font-size:11px">SET ${j+1}</span>
+          <span style="font-weight:600;color:#e2e2e2">${s.reps||"—"} reps</span>
+          ${s.weight ? `<span style="color:#555">@</span><span style="font-weight:600;color:#c8a96e">${s.weight} lbs</span>` : ""}
+          ${s.notes ? `<span style="color:#555;font-size:11px">${esc(s.notes)}</span>` : ""}
+        </div>`).join("")}
+    </div>`).join("") : ""}
+  ${log.type==="cardio" && log.cardio ? `<div class="card" style="padding:14px;margin-bottom:8px;color:#aaa">${esc(log.cardio)}</div>` : ""}
+  ${log.notes ? `<div class="card" style="padding:14px"><p class="section-title">NOTES</p><div style="color:#aaa;font-size:13px">${esc(log.notes)}</div></div>` : ""}
+  `;
+}
+
+function openHistoryDetail(date) { _historyDetail = date; renderApp(); }
+function closeHistoryDetail()    { _historyDetail = null; renderApp(); }
+function editDay(date, targetTab) {
+  _historyDetail = null;
+  window._editDate = date;
+  window._tab = targetTab;
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+  document.getElementById("nav-"+targetTab).classList.add("active");
+  renderApp();
+}
+
+// ══════════════════════════════════════════════════
+//  WEEKLY TAB
+// ══════════════════════════════════════════════════
+let _weekOffset = 0;
+
+function renderWeekly(offset) {
+  _weekOffset = offset;
+  const now = new Date();
+  const day = now.getDay();
+  const mon = new Date(now);
+  mon.setDate(now.getDate() + (day===0?-6:1-day) + offset*7);
+
+  const weekDates = Array.from({length:7},(_,i)=>{
+    const d = new Date(mon); d.setDate(mon.getDate()+i);
+    return d.toISOString().slice(0,10);
+  });
+
+  const setsPerMuscle = {};
+  MUSCLES.forEach(m=>setsPerMuscle[m]=0);
+  weekDates.forEach(date=>{
+    const log = window._logs[date];
+    if (!log || log.type!=="training") return;
+    (log.exercises||[]).forEach(ex=>{
+      if (setsPerMuscle[ex.muscle]!==undefined) setsPerMuscle[ex.muscle]+=(ex.sets||[]).length;
+    });
+  });
+
+  const totalTraining = weekDates.filter(d=>window._logs[d]?.type==="training").length;
+  const totalSets = Object.values(setsPerMuscle).reduce((a,b)=>a+b,0);
+
+  const s = new Date(weekDates[0]+"T12:00:00");
+  const e = new Date(weekDates[6]+"T12:00:00");
+  const weekLabel = `${MONTHS[s.getMonth()]} ${s.getDate()} – ${MONTHS[e.getMonth()]} ${e.getDate()}`;
+  const tod = todayStr();
+
+  const dc = {training:"#c8a96e",cardio:"#6eaec8",rest:"#3a3a5a"};
+  const dl = {training:"T",cardio:"C",rest:"R"};
+
+  return `
+  <!-- Week nav -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <button class="btn-ghost" style="padding:6px 14px;font-size:18px" onclick="renderWeeklyInplace(${offset-1})">‹</button>
+    <div style="text-align:center">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:#c8a96e">${weekLabel}</div>
+      ${offset===0 ? `<div style="font-size:10px;color:#555;letter-spacing:1px">CURRENT WEEK</div>` : ""}
+    </div>
+    <button class="btn-ghost" style="padding:6px 14px;font-size:18px;opacity:${offset>=0?.3:1}" onclick="renderWeeklyInplace(${Math.min(0,offset+1)})" ${offset>=0?"disabled":""}>›</button>
+  </div>
+
+  <!-- Week strip -->
+  <div class="card" style="padding:14px;margin-bottom:12px">
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+      ${weekDates.map((date,i)=>{
+        const log = window._logs[date];
+        const type = log?.type||null;
+        const isToday = date===tod;
+        return `
+        <div style="text-align:center">
+          <div style="font-size:10px;color:#555;margin-bottom:4px">${DAYS[(i+1)%7]}</div>
+          <div style="width:100%;aspect-ratio:1;border-radius:8px;background:${dc[type]||"#1a1a22"};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${type?"#0a0a0f":"#333"};border:${isToday?"2px solid #c8a96e":"2px solid transparent"}">
+            ${dl[type]||"–"}
+          </div>
+          <div style="font-size:9px;color:#555;margin-top:3px">${fmtShort(date).split(" ")[1]}</div>
+        </div>`;}).join("")}
+    </div>
+    <div style="display:flex;gap:12px;margin-top:12px;font-size:11px;color:#555;justify-content:center">
+      ${[["#c8a96e","Train"],["#6eaec8","Cardio"],["#3a3a5a","Rest"]].map(([c,l])=>`
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:${c}"></div>${l}</div>`).join("")}
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+    ${[["Training Days",totalTraining],["Total Sets",totalSets]].map(([l,v])=>`
+    <div class="card" style="padding:14px;text-align:center">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:#c8a96e;line-height:1">${v}</div>
+      <div style="font-size:11px;color:#555;margin-top:4px;letter-spacing:1px">${l.toUpperCase()}</div>
+    </div>`).join("")}
+  </div>
+
+  <!-- Volume bars -->
+  <p class="section-title">VOLUME BY MUSCLE GROUP</p>
+  <div class="card" style="padding:14px">
+    ${MUSCLES.map(m=>{
+      const sets = setsPerMuscle[m];
+      const rec  = REC[m];
+      const pct  = Math.min(sets/rec,1)*100;
+      const over = sets>rec;
+      const clr  = sets===0?"transparent":over?"linear-gradient(90deg,#6ec87a,#8ef09a)":"linear-gradient(90deg,#c8a96e,#e8c98e)";
+      return `
+      <div class="week-bar-wrap">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:13px">${m}</span>
+          <span style="font-size:12px;color:${sets===0?"#444":over?"#8ec86e":"#c8a96e"};font-weight:600">${sets}<span style="color:#444;font-weight:400;font-size:11px">/${rec}</span></span>
+        </div>
+        <div style="height:6px;background:#1a1a22;border-radius:3px;margin-bottom:8px">
+          <div style="width:${pct}%;height:100%;border-radius:3px;background:${clr};transition:width .4s"></div>
+        </div>
+      </div>`;}).join("")}
+    <div style="font-size:11px;color:#444;margin-top:4px">Based on hypertrophy ranges · sets / recommended</div>
+  </div>`;
+}
+
+function renderWeeklyInplace(offset) {
+  document.getElementById("mainContent").innerHTML = renderWeekly(offset);
+  bindEvents();
+}
+
+// ══════════════════════════════════════════════════
+//  PEPTIDES TAB
+// ══════════════════════════════════════════════════
+let _pepShowHistory = false;
+
+function renderPeptides(date) {
+  const log = window._logs[date] || {};
+  const peptides = log.peptides || [];
+  const isToday = date === todayStr();
+
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate()-now.getDay());
+  const weekStr = weekStart.toISOString().slice(0,10);
+  const weekTotals = {};
+  Object.entries(window._logs).forEach(([d,l])=>{
+    if (d < weekStr) return;
+    (l.peptides||[]).forEach(p=>{ if(p.name) weekTotals[p.name]=(weekTotals[p.name]||0)+parseFloat(p.mg||0); });
+  });
+
+  const recentDates = Object.entries(window._logs)
+    .filter(([,l])=>(l.peptides||[]).length>0)
+    .sort(([a],[b])=>b.localeCompare(a))
+    .slice(0,14);
+
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div>
+      <p class="section-title" style="margin:0">${isToday?"TODAY'S PINS":`PINS · ${fmtShort(date)}`}</p>
+      ${!isToday ? `<button class="btn-ghost" style="padding:4px 10px;font-size:11px;margin-top:6px" onclick="backToPepToday()">← Back to Today</button>` : ""}
+    </div>
+    <button class="btn-ghost" style="padding:5px 10px;font-size:11px" onclick="togglePepHistory()">
+      ${_pepShowHistory?"HIDE HISTORY":"VIEW HISTORY"}
+    </button>
+  </div>
+
+  ${!_pepShowHistory ? `
+  <datalist id="pepNameList">${window._pepNames.map(n=>`<option value="${esc(n)}"/>`).join("")}</datalist>
+
+  ${peptides.map((p,i)=>`
+  <div class="card" style="padding:12px;margin-bottom:8px">
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <input class="input-field" placeholder="Peptide / compound" value="${esc(p.name||"")}" list="pepNameList"
+        style="flex:2;font-size:14px;font-weight:500" onchange="updatePeptide('${date}',${i},'name',this.value)"/>
+      <input class="input-field" type="number" placeholder="mg" value="${esc(p.mg||"")}"
+        style="flex:1;text-align:center;font-weight:600;font-size:14px" onchange="updatePeptide('${date}',${i},'mg',this.value)"/>
+      <button onclick="removePeptide('${date}',${i})" style="background:none;border:none;color:#c44;cursor:pointer;padding:4px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+      </button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <input class="input-field" placeholder="Time (AM/PM)" value="${esc(p.time||"")}"
+        style="font-size:12px" onchange="updatePeptide('${date}',${i},'time',this.value)"/>
+      <input class="input-field" placeholder="Site (Sub-Q, IM…)" value="${esc(p.site||"")}"
+        style="font-size:12px" onchange="updatePeptide('${date}',${i},'site',this.value)"/>
+    </div>
+    <input class="input-field" placeholder="Notes…" value="${esc(p.notes||"")}"
+      style="margin-top:6px;font-size:12px" onchange="updatePeptide('${date}',${i},'notes',this.value)"/>
+  </div>`).join("")}
+
+  <button class="btn-gold" onclick="addPeptide('${date}')"
+    style="width:100%;padding:12px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:16px">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ADD PIN
+  </button>
+
+  ${Object.keys(weekTotals).length ? `
+  <p class="section-title">THIS WEEK'S TOTALS</p>
+  <div class="card" style="padding:14px">
+    ${Object.entries(weekTotals).map(([name,total])=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:14px;font-weight:500">${esc(name)}</span>
+      <span style="color:#c8a96e;font-weight:700;font-size:15px">${total.toFixed(2)} <span style="font-size:11px;color:#555;font-weight:400">mg</span></span>
+    </div>`).join("")}
+  </div>` : ""}
+  ` : `
+  <!-- History -->
+  <p class="section-title">PIN HISTORY</p>
+  ${recentDates.length===0 ? `<div style="color:#555;text-align:center;padding:30px">No pin history yet.</div>` : ""}
+  ${recentDates.map(([d,l])=>`
+  <div class="card" style="padding:14px;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1.5px;color:#c8a96e">${fmtDate(d)}</div>
+      <button class="btn-ghost" style="padding:4px 10px;font-size:11px" onclick="editPepDay('${d}')">Edit</button>
+    </div>
+    ${(l.peptides||[]).map((p,pi)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #1a1a22">
+      <div>
+        <div style="font-weight:600;font-size:13px">${esc(p.name)}</div>
+        <div style="font-size:11px;color:#555">${[p.time,p.site].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div style="color:#c8a96e;font-weight:700">${p.mg} mg</div>
+    </div>`).join("")}
+  </div>`).join("")}
+  `}`;
+}
+
+function addPeptide(date) {
+  const peps = [...(window._logs[date]?.peptides||[]),{name:"",mg:"",time:"",site:"",notes:""}];
+  updateLog(date,{peptides:peps});
+  renderApp();
+}
+function removePeptide(date,i) {
+  const peps = [...(window._logs[date]?.peptides||[])];
+  peps.splice(i,1);
+  updateLog(date,{peptides:peps});
+  renderApp();
+}
+function updatePeptide(date,i,field,val) {
+  const peps = JSON.parse(JSON.stringify(window._logs[date]?.peptides||[]));
+  peps[i][field] = val;
+  if (field==="name" && val && !window._pepNames.includes(val)) {
+    window._pepNames.push(val);
+    window._db.savePeptideNames(window._pepNames);
+  }
+  updateLog(date,{peptides:peps});
+}
+function togglePepHistory()  { _pepShowHistory=!_pepShowHistory; renderApp(); }
+function backToPepToday()    { window._editDate=null; renderApp(); }
+function editPepDay(date)    { _pepShowHistory=false; window._editDate=date; renderApp(); }
+
+// ══════════════════════════════════════════════════
+//  UTILITIES
+// ══════════════════════════════════════════════════
+function esc(str) {
+  if (str===undefined||str===null) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function bindEvents() {
+  // textarea onchange fires on blur; also wire oninput for instant save
+  document.querySelectorAll("textarea").forEach(el=>{
+    el.addEventListener("input", ()=>el.onchange && el.onchange());
+  });
+}
+</script>
+</body>
+</html>
 
